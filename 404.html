@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Opening application…</title>
+</head>
+<body>
+<script>
+(function () {
+  var parts = window.location.pathname.split('/').filter(Boolean);
+  var isGithubPages = window.location.hostname.endsWith('.github.io');
+  var base = isGithubPages && parts.length ? '/' + parts[0] : '';
+  var route = window.location.pathname.slice(base.length) || '/';
+  var target = base + '/?__route=' + encodeURIComponent(route);
+  var query = window.location.search.replace(/^\?/, '');
+  if (query) target += '&' + query;
+  if (window.location.hash) target += window.location.hash;
+  window.location.replace(target);
+})();
+</script>
+</body>
+</html>

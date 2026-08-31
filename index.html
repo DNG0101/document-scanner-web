@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1" />
+    <title>Papertrail — Private document scanner</title>
+    <meta name="description" content="Capture, clean up, and export documents locally in your browser. No account and no uploads." />
+    <meta name="robots" content="index, follow" />
+    <meta property="og:title" content="Papertrail — Private document scanner" />
+    <meta property="og:description" content="Capture, clean up, and export documents locally in your browser." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Document Scanner Web" />
+    <meta name="twitter:description" content="Document Scanner Web — built on Replit. Update this description to reflect the app." />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      (function () {
+        var parts = window.location.pathname.split('/').filter(Boolean);
+        window.__APP_BASE__ = window.location.hostname.endsWith('.github.io') && parts.length ? '/' + parts[0] : '';
+        var params = new URLSearchParams(window.location.search);
+        var redirectedPath = params.get('__route');
+        if (redirectedPath) {
+          params.delete('__route');
+          var query = params.toString();
+          var restored = (window.__APP_BASE__ || '') + redirectedPath + (query ? '?' + query : '') + window.location.hash;
+          window.history.replaceState(null, '', restored);
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="./assets/index-erm-TZp4.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-CHU_86Cc.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
