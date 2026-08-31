@@ -1,0 +1,11 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+const source=fs.readFileSync(new URL('../src/legacy-app.js',import.meta.url),'utf8');
+const excerpt=source.slice(source.indexOf('function Pn(c)'),source.indexOf('async function d0(c)'));
+const sandbox={TextEncoder,Uint8Array,Blob,localStorage:{getItem:()=>null},u0:async()=>({bytes:new Uint8Array([255,216,255,217]),width:400,height:200})};
+vm.createContext(sandbox);vm.runInContext(excerpt,sandbox);
+test('PDF has valid cross-reference offsets and page count',async()=>{const blob=await sandbox.h0({pages:[{},{}]});const bytes=new Uint8Array(await blob.arrayBuffer()),text=new TextDecoder().decode(bytes);assert.match(text,/\/Count 2/);assert.match(text,/%PDF-1.4/);const start=Number(text.match(/startxref\n(\d+)/)[1]);assert.equal(new TextDecoder().decode(bytes.slice(start,start+4)),'xref');const entries=text.slice(text.indexOf('0000000000 65535 f')).split('\n').slice(1,9);entries.forEach((entry,i)=>{const offset=Number(entry.slice(0,10));assert.equal(new TextDecoder().decode(bytes.slice(offset,offset+`${i+1} 0 obj`.length)),`${i+1} 0 obj`);});});
+test('landscape image is centered on paper',async()=>{const text=await(await sandbox.h0({pages:[{}]})).text();assert.match(text,/595 0 0 298 0 272 cm/);});
+test('empty PDF export rejected',async()=>assert.rejects(sandbox.h0({pages:[]}),/Add a page/));

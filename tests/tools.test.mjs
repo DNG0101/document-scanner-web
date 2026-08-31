@@ -1,0 +1,13 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {pageSelection,fullCrop,validCrop,csvFromText,validateBackup} from '../src/document-tools.js';
+test('blank selection means all pages',()=>assert.deepEqual(pageSelection('',3),[0,1,2]));
+test('ranges preserve requested order and remove duplicates',()=>assert.deepEqual(pageSelection('3,1-2,2',3),[2,0,1]));
+for(const text of ['0','4','2-1','abc','1,','1.5','-1','1-999999999'])test(`invalid selection ${text} is rejected`,()=>assert.throws(()=>pageSelection(text,3)));
+test('full-image crop valid',()=>assert.equal(validCrop(fullCrop()),true));
+test('crossed crop rejected',()=>assert.equal(validCrop({tl:[0,0],tr:[100,100],br:[100,0],bl:[0,100]}),false));
+test('collapsed crop rejected',()=>assert.equal(validCrop({tl:[0,0],tr:[0,0],br:[0,0],bl:[0,0]}),false));
+test('out of bounds crop rejected',()=>assert.equal(validCrop({...fullCrop(),tl:[-5,0]}),false));
+test('CSV quoting and formula injection protection',()=>assert.equal(csvFromText('Name\t=1+1\nA"B  42'),'"Name","\'=1+1"\r\n"A""B","42"'));
+test('backup rejects remote images',()=>assert.throws(()=>validateBackup({format:'papertrail-backup-v1',documents:[{name:'x',pages:[{src:'https://tracking.test/a.png',crop:fullCrop()}]}]})));
+test('backup validates and limits optional data',()=>{const result=validateBackup({format:'papertrail-backup-v1',documents:[{name:'x',pages:[{src:'data:image/png;base64,AAAA',crop:fullCrop(),brightness:999}]}]});assert.equal(result[0].pages[0].brightness,135);});

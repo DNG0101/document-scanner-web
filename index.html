@@ -11,7 +11,7 @@
     <meta property="og:type" content="website" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Document Scanner Web" />
-    <meta name="twitter:description" content="Document Scanner Web — built on Replit. Update this description to reflect the app." />
+    <meta name="twitter:description" content="Private document scanning, editing, review and export in your browser." />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -20,7 +20,10 @@
     <script>
       (function () {
         var parts = window.location.pathname.split('/').filter(Boolean);
-        window.__APP_BASE__ = window.location.hostname.endsWith('.github.io') && parts.length ? '/' + parts[0] : '';
+        window.__APP_BASE__ = (window.location.hostname.endsWith('.github.io') || parts[0] === 'document-scanner-web') && parts.length ? '/' + parts[0] : '';
+        var base = document.createElement('base');
+        base.href = (window.__APP_BASE__ || '') + '/';
+        document.head.prepend(base);
         var params = new URLSearchParams(window.location.search);
         var redirectedPath = params.get('__route');
         if (redirectedPath) {
@@ -31,8 +34,9 @@
         }
       })();
     </script>
-    <script type="module" crossorigin src="./assets/index-erm-TZp4.js"></script>
+    <script type="module" crossorigin src="./assets/app-b34e88e0fb1a.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-CHU_86Cc.css">
+    <link rel="stylesheet" href="./assets/tools-f17351194cc6.css">
   </head>
   <body>
     <div id="root"></div>

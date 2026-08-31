@@ -1,0 +1,156 @@
+import {zipSync,strToU8} from 'fflate';
+import {Document,Packer,Paragraph,TextRun} from 'docx';
+import pptxgen from 'pptxgenjs';
+import jsQR from 'jsqr';
+import {pageSelection,fullCrop,csvFromText,validateBackup,download,canvasBlob,imageFromBytes} from './document-tools.js';
+
+export async function decodeQR(file) {
+  const image=await createImageBitmap(file);
+  try {
+    const canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;
+    const context=canvas.getContext('2d',{willReadFrequently:true});context.drawImage(image,0,0);
+    const data=context.getImageData(0,0,canvas.width,canvas.height);
+    return jsQR(data.data,data.width,data.height)?.data || null;
+  } finally {image.close();}
+}
+
+export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,safeName,readImage}) {
+  const h=R.createElement;
+  const button=(name,action,disabled=false,extra={})=>h('button',{type:'button',onClick:action,disabled,...extra},name);
+  function RenderedPage({page,watermark,alt,...props}) {
+    const [url,setUrl]=R.useState(''),[error,setError]=R.useState('');
+    const pageKey=JSON.stringify(page);
+    R.useEffect(()=>{
+      let cancelled=false,objectURL;
+      setUrl('');setError('');
+      renderPage(page,{watermark}).then(result=>{
+        if(cancelled)return; objectURL=URL.createObjectURL(new Blob([result.bytes],{type:'image/jpeg'}));setUrl(objectURL);
+      }).catch(e=>!cancelled&&setError(e.message));
+      return ()=>{cancelled=true;if(objectURL)URL.revokeObjectURL(objectURL);};
+    },[pageKey,watermark]);
+    return url?h('img',{...props,src:url,alt}):h('span',{role:'status'},error||'Preparing page…');
+  }
+  function SignatureCanvas({active,strokes,onChange}) {
+    const canvasRef=R.useRef(null),points=R.useRef([]),paint=R.useRef(()=>{});
+    paint.current=()=>{
+      const canvas=canvasRef.current;if(!canvas)return;
+      const rect=canvas.getBoundingClientRect(),dpr=window.devicePixelRatio||1;
+      canvas.width=Math.max(1,Math.round(rect.width*dpr));canvas.height=Math.max(1,Math.round(rect.height*dpr));
+      const ctx=canvas.getContext('2d');ctx.scale(dpr,dpr);
+      for(const stroke of [...strokes,...(points.current.length?[{color:'#17363a',width:3,points:points.current}]:[])]){
+        ctx.strokeStyle=stroke.color;ctx.lineWidth=stroke.width*Math.max(rect.width,rect.height)/1000;ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();
+        stroke.points.forEach(([x,y],i)=>i?ctx.lineTo(x/100*rect.width,y/100*rect.height):ctx.moveTo(x/100*rect.width,y/100*rect.height));ctx.stroke();
+      }
+    };
+    R.useEffect(()=>{const observer=new ResizeObserver(()=>paint.current());observer.observe(canvasRef.current);paint.current();return()=>observer.disconnect();},[]);
+    R.useEffect(()=>paint.current(),[strokes,active]);
+    const position=e=>{const rect=e.currentTarget.getBoundingClientRect();return [Math.max(0,Math.min(100,(e.clientX-rect.left)/rect.width*100)),Math.max(0,Math.min(100,(e.clientY-rect.top)/rect.height*100))];};
+    return h('canvas',{ref:canvasRef,'data-testid':'canvas-ink-overlay','aria-label':'Draw signature on corrected page',className:`absolute inset-0 z-20 h-full w-full touch-none ${active?'cursor-crosshair':'pointer-events-none'}`,
+      onPointerDown:e=>{if(active){e.currentTarget.setPointerCapture(e.pointerId);points.current=[position(e)];}},
+      onPointerMove:e=>{if(active&&points.current.length){points.current.push(position(e));paint.current();}},
+      onPointerUp:e=>{if(points.current.length){e.currentTarget.releasePointerCapture(e.pointerId);const stroke={color:'#17363a',width:3,points:[...points.current]};points.current=[];onChange([...strokes,stroke]);}},
+      onPointerCancel:()=>{points.current=[];paint.current();}});
+  }
+  function Preview({doc,onClose}) {
+    const [index,setIndex]=R.useState(0),[zoom,setZoom]=R.useState(100),[url,setUrl]=R.useState(''),[error,setError]=R.useState(''),[ready,setReady]=R.useState(false);
+    const handle=R.useRef(null),pdf=R.useRef(null),blob=R.useRef(null),renderJob=R.useRef(null);
+    const {updateDocument}=useScanner();
+    R.useEffect(()=>{
+      handle.current.showModal();
+      let disposed=false,task;
+      (async()=>{
+        blob.current=await makePdf(doc); if(disposed)return;
+        task=pdfjs.getDocument({data:await blob.current.arrayBuffer()});
+        const loaded=await task.promise;if(disposed){await task.destroy();return;}
+        pdf.current=loaded;setReady(true);
+      })().catch(e=>!disposed&&setError(e.message));
+      return ()=>{disposed=true;renderJob.current?.cancel();task?.destroy();};
+    },[]);
+    R.useEffect(()=>{
+      if(!ready)return;
+      let disposed=false,objectURL;
+      setUrl('');
+      (async()=>{
+        const page=await pdf.current.getPage(index+1);if(disposed)return;
+        const viewport=page.getViewport({scale:1.5}),canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
+        const task=page.render({canvas,canvasContext:canvas.getContext('2d'),viewport});renderJob.current=task;await task.promise;
+        const image=await canvasBlob(canvas);if(disposed)return;
+        objectURL=URL.createObjectURL(image);setUrl(objectURL);
+      })().catch(e=>{if(!disposed&&e.name!=='RenderingCancelledException')setError(e.message);});
+      return ()=>{disposed=true;renderJob.current?.cancel();if(objectURL)URL.revokeObjectURL(objectURL);};
+    },[index,ready]);
+    return h('dialog',{ref:handle,className:'pt-preview','aria-label':'PDF preview and review',onCancel:onClose,onKeyDown:e=>{
+      if(e.target.tagName==='BUTTON')return;
+      if(e.key==='ArrowRight')setIndex(i=>Math.min(doc.pages.length-1,i+1));
+      if(e.key==='ArrowLeft')setIndex(i=>Math.max(0,i-1));
+    }},
+      h('header',null,h('h2',null,'PDF preview & review'),button('Close preview',onClose)),
+      h('p',null,`${doc.name} · Page ${index+1} of ${doc.pages.length} · Actual exported PDF, including crop, ink, watermark and paper size.`),
+      h('nav',{'aria-label':'Preview controls'},button('Previous',()=>setIndex(i=>i-1),index===0),button('Next',()=>setIndex(i=>i+1),index===doc.pages.length-1),
+        button('Zoom out',()=>setZoom(z=>Math.max(50,z-25)),zoom===50),h('output',null,`${zoom}%`),button('Zoom in',()=>setZoom(z=>Math.min(200,z+25)),zoom===200),button('Fit',()=>setZoom(100)),
+        button('Download reviewed PDF',()=>download(blob.current,safeName(doc.name,'scan')+'.pdf'),!ready),
+        button('Mark document reviewed',async()=>{try {await updateDocument(doc.id,{reviewedAt:new Date().toISOString()});onClose();}catch(e){setError(e.message);}},!ready)),
+      error?h('p',{role:'alert'},error):h('div',{className:'pt-preview-sheet'},url?h('img',{src:url,alt:`PDF preview page ${index+1}`,style:{height:zoom*.65+'vh',width:'auto',maxWidth:zoom===100?'100%':'none',objectFit:'contain'}}):h('p',{role:'status'},'Rendering PDF…')));
+  }
+  function EditorTools({doc,page,onSelect}) {
+    const api=useScanner(),[busy,setBusy]=R.useState(false),[notice,setNotice]=R.useState(''),[selection,setSelection]=R.useState(''),[preview,setPreview]=R.useState(null),[text,setText]=R.useState('');
+    const current=doc.pages.findIndex(p=>p.id===page.id);
+    const run=async fn=>{setBusy(true);setNotice('');try {await fn();}catch(e){setNotice(e.message||'Operation failed.');}finally{setBusy(false);}};
+    const selected=()=>pageSelection(selection,doc.pages.length).map(i=>doc.pages[i]);
+    const rendered=async()=>{const result=[];for(const p of selected())result.push(await renderPage(p,{watermark:doc.watermark}));return result;};
+    const saveImageDocument=async(canvas,name)=>{
+      const file=new File([await canvasBlob(canvas)],name+'.png',{type:'image/png'});
+      const created=await api.createDocument([file],name);
+      await api.updatePage(created.id,created.pages[0].id,{crop:fullCrop(),filter:'original'});
+      setNotice(`Created “${name}” in your library. Original pages are unchanged.`);
+    };
+    const compose=async layout=>{
+      const images=await rendered();if(!images.length)throw new Error('Choose at least one page.');
+      const width=1200,gap=24,cell=layout==='long'?width:(width-gap*3)/2;
+      const heights=images.map(p=>Math.round(cell*p.height/p.width));
+      const row=layout==='long'?0:Math.max(...heights);
+      const height=layout==='long'?heights.reduce((a,b)=>a+b,0)+gap*(images.length+1):Math.ceil(images.length/2)*(row+gap)+gap;
+      if(height>16000||width*height>24000000)throw new Error('Too many pages for one image. Select fewer pages.');
+      const canvas=document.createElement('canvas');canvas.width=layout==='long'?width+gap*2:width;canvas.height=height;
+      const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,canvas.width,canvas.height);
+      let y=gap;
+      for(let i=0;i<images.length;i++) {const image=await imageFromBytes(images[i].bytes);ctx.drawImage(image,layout==='long'?gap:gap+(i%2)*(cell+gap),layout==='long'?y:gap+Math.floor(i/2)*(row+gap),cell,heights[i]);image.close();y+=heights[i]+gap;}
+      await saveImageDocument(canvas,doc.name+(layout==='long'?' long image':' collage'));
+    };
+    const exportText=()=>selected().map(p=>p.ocrText||'').join('\n\n');
+    return h('section',{className:'pt-tools','aria-label':'Document tools'},h('h2',null,'Review & document tools'),
+      h('div',{className:'pt-actions'},button('Preview & review PDF',()=>run(async()=>{await api.flush();setPreview(await api.getDocument(doc.id));}),busy),h('span',null,doc.reviewedAt?'Reviewed':'Not yet reviewed')),
+      h('details',null,h('summary',null,'Pages, exports & conversion'),
+        h('label',null,'Page selection',h('input',{'aria-label':'Page selection',placeholder:'All pages, or 1,3-5',value:selection,onChange:e=>setSelection(e.target.value)})),
+        h('div',{className:'pt-actions'},
+          button('Extract selected pages',()=>run(async()=>{const pages=selected();await api.insert({...doc,name:doc.name+' extracted',pages,reviewedAt:undefined});setNotice('Selected pages copied to a new document in your library.');}),busy),
+          button('Move page earlier',()=>run(async()=>{await api.reorderPages(doc.id,current,current-1);onSelect(current-1);}),busy||current<1),
+          button('Move page later',()=>run(async()=>{await api.reorderPages(doc.id,current,current+1);onSelect(current+1);}),busy||current===doc.pages.length-1),
+          button('Split book page',()=>run(async()=>{
+            const result=await renderPage(page),image=await imageFromBytes(result.bytes),files=[];
+            try {for(let i=0;i<2;i++){const start=Math.floor(image.width*i/2),end=Math.floor(image.width*(i+1)/2),canvas=document.createElement('canvas');canvas.width=end-start;canvas.height=image.height;canvas.getContext('2d').drawImage(image,start,0,canvas.width,image.height,0,0,canvas.width,image.height);files.push(new File([await canvasBlob(canvas)],`${page.name}-${i+1}.png`,{type:'image/png'}));}}finally{image.close();}
+            const created=await api.createDocument(files,doc.name+' book split','book');for(const p of created.pages)await api.updatePage(created.id,p.id,{crop:fullCrop(),filter:'original'});setNotice('Two facing pages saved as a new document.');
+          }),busy),
+          button('Create collage / ID sheet',()=>run(()=>compose('collage')),busy),button('Create long image',()=>run(()=>compose('long')),busy),
+          button('Export images ZIP',()=>run(async()=>{const files={};const images=await rendered();images.forEach((p,i)=>files[`page-${String(i+1).padStart(3,'0')}.jpg`]=p.bytes);download(new Blob([zipSync(files,{level:0})]),safeName(doc.name,'scan')+'.zip');setNotice('Images ZIP downloaded.');}),busy),
+          button('Export text TXT',()=>run(async()=>{const value=exportText();if(!value.trim())throw new Error('Run text extraction first.');download(new Blob([value],{type:'text/plain;charset=utf-8'}),safeName(doc.name,'scan')+'.txt');}),busy),
+          button('Export spreadsheet CSV',()=>run(async()=>{const value=exportText();if(!value.trim())throw new Error('Run text extraction first.');download(new Blob(['\uFEFF'+csvFromText(value)],{type:'text/csv;charset=utf-8'}),safeName(doc.name,'scan')+'.csv');setNotice('CSV exported. Review OCR and column alignment before use.');}),busy),
+          button('Export Word DOCX',()=>run(async()=>{const value=exportText();if(!value.trim())throw new Error('Run text extraction first.');const word=new Document({sections:[{children:value.split('\n').map(line=>new Paragraph({children:[new TextRun(line)]}))}]});download(await Packer.toBlob(word),safeName(doc.name,'scan')+'.docx');setNotice('Editable text exported; original page layout is not reconstructed.');}),busy),
+          button('Export slides PPTX',()=>run(async()=>{const deck=new pptxgen();deck.layout='LAYOUT_WIDE';for(const p of await rendered()){const slide=deck.addSlide();const blob=new Blob([p.bytes],{type:'image/jpeg'});const data=await readImage(new File([blob],'slide.jpg',{type:'image/jpeg'}));const factor=Math.min(13.333/p.width,7.5/p.height),w=p.width*factor,height=p.height*factor;slide.addImage({data,x:(13.333-w)/2,y:(7.5-height)/2,w,h:height});}await deck.writeFile({fileName:safeName(doc.name,'scan')+'.pptx'});setNotice('Slides downloaded. Each page is an image, not editable slide objects.');}),busy)),
+        h('p',null,'Compression, paper size and orientation are in Settings. CSV infers columns from tabs or multiple spaces. Word exports OCR text; slides contain page images.')),
+      h('details',null,h('summary',null,'Page cleanup & annotation'),
+        h('div',{className:'pt-actions'},button('Reset crop to full image',()=>run(()=>api.updatePage(doc.id,page.id,{crop:fullCrop()})),busy),
+          button('Apply finish to all pages',()=>run(async()=>{for(const p of doc.pages)await api.updatePage(doc.id,p.id,{filter:page.filter,brightness:page.brightness,contrast:page.contrast});setNotice('Finish applied to every page.');}),busy)),
+        h('label',null,'Text annotation',h('input',{'aria-label':'Text annotation',value:text,onChange:e=>setText(e.target.value),maxLength:120})),
+        button('Add text to page',()=>run(async()=>{if(!text.trim())throw new Error('Enter annotation text first.');const result=await renderPage(page),image=await imageFromBytes(result.bytes),canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);image.close();const font=Math.max(14,Math.round(canvas.width/30));ctx.font=`600 ${font}px sans-serif`;ctx.fillStyle='white';ctx.fillRect(0,canvas.height-font*2,canvas.width,font*2);ctx.fillStyle='#17363a';ctx.fillText(text,16,canvas.height-font*.6,canvas.width-32);const src=await readImage(new File([await canvasBlob(canvas)],'annotated.png',{type:'image/png'}));await api.duplicatePage(doc.id,page.id);await api.updatePage(doc.id,page.id,{src,crop:fullCrop(),rotation:0,filter:'original',brightness:100,contrast:100,ink:[],ocrText:undefined});setText('');setNotice('Text added. An unchanged copy of the page was preserved.');}),busy)),
+      h('p',{role:'status','aria-live':'polite'},busy?'Working locally…':notice),preview&&h(Preview,{doc:preview,onClose:()=>setPreview(null)}));
+  }
+  function LibraryTools() {
+    const api=useScanner(),input=R.useRef(null),[status,setStatus]=R.useState(''),[busy,setBusy]=R.useState(false);
+    return h('section',{className:'pt-tools','aria-label':'Library backup'},h('details',null,h('summary',null,'Backup & restore'),h('p',null,'Backups include your documents and images. Keep the downloaded file private. Restore adds copies without replacing existing documents.'),
+      h('div',{className:'pt-actions'},button('Download library backup',()=>download(new Blob([JSON.stringify({format:'papertrail-backup-v1',documents:api.documents})],{type:'application/json'}),'papertrail-backup.json'),busy),button('Restore backup',()=>input.current.click(),busy)),
+      h('input',{ref:input,type:'file',accept:'.json',hidden:true,onChange:async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;setBusy(true);try {if(file.size>150*1024*1024)throw new Error('Backup exceeds 150 MB.');const docs=validateBackup(JSON.parse(await file.text()));let count=0;for(const doc of docs){await api.insert(doc);count++;setStatus(`Restored ${count} of ${docs.length} documents.`);}}catch(error){setStatus(error.message);}finally{setBusy(false);}}}),h('p',{role:'status'},status)));
+  }
+  function StorageNotice() {const api=useScanner();return api.error?h('div',{className:'pt-storage-error',role:'alert'},'Not saved: '+api.error,button('Dismiss',api.clearError)):null;}
+  return {EditorTools,LibraryTools,RenderedPage,StorageNotice,SignatureCanvas};
+}
