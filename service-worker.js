@@ -1,40 +1,11 @@
-const CACHE_NAME = "papertrail-shell-v1";
-
-self.addEventListener("install", (event) => {
-  event.waitUntil((async () => {
-    const cache = await caches.open(CACHE_NAME);
-    const base = new URL("./", self.registration.scope).pathname;
-    await cache.addAll([base, `${base}index.html`, `${base}favicon.svg`, `${base}manifest.webmanifest`]);
-    await self.skipWaiting();
-  })());
-});
-
-self.addEventListener("activate", (event) => {
-  event.waitUntil((async () => {
-    const keys = await caches.keys();
-    await Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)));
-    await self.clients.claim();
-  })());
-});
-
-self.addEventListener("fetch", (event) => {
-  if (event.request.method !== "GET" || new URL(event.request.url).origin !== self.location.origin) return;
-  event.respondWith((async () => {
-    const cached = await caches.match(event.request);
-    if (cached) return cached;
-    try {
-      const response = await fetch(event.request);
-      if (response.ok) {
-        const copy = response.clone();
-        caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
-      }
-      return response;
-    } catch {
-      if (event.request.mode === "navigate") {
-        const base = new URL("./", self.registration.scope).pathname;
-        return caches.match(`${base}index.html`);
-      }
-      return new Response("Offline", { status: 503, statusText: "Offline" });
-    }
-  })());
+const CACHE='papertrail-cc1c6ebe14b2';
+const SHELL=["./","./index.html","./assets/app-b34e88e0fb1a.js","./assets/index-CHU_86Cc.css","./assets/tools-f17351194cc6.css","./assets/pdf.worker-TGcf_-kp.mjs","./favicon.svg","./icon-192.svg","./icon-512.svg","./manifest.webmanifest"];
+self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)).then(()=>self.skipWaiting())));
+self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('papertrail-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
+self.addEventListener('fetch',event=>{
+ if(event.request.method!=='GET'||new URL(event.request.url).origin!==self.location.origin) return;
+ event.respondWith((async()=>{
+   if(event.request.mode==='navigate') {try {const response=await fetch(event.request);if(response.ok)return response;}catch{} return caches.match(new URL('./index.html',self.registration.scope));}
+   const cached=await caches.match(event.request); return cached||fetch(event.request);
+ })());
 });
