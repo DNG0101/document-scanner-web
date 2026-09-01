@@ -1,3 +1,4 @@
+import {createScanPdf,openPdf,ocrTokens} from './pdf-tools.js';
 // Recovered from the published bundle; original framework source was not in the repository.
 import {createScannerProvider} from './store.js';
 import {createEnhancements,decodeQR} from './enhancements.js';
@@ -15318,81 +15319,9 @@ function yS() {
     return { width: 595, height: 842, quality: 0.88 };
   }
 }
-async function h0(c) {
-  if(!c.pages.length) throw new Error("Add a page before exporting.");
-  const t = yS(), e=[];
-  for(const page of c.pages) e.push(await u0(page,{watermark:c.watermark,quality:t.quality}));
-  const
-    s = 2 + e.length * 3,
-    a = new Array(s + 1),
-    o = e.map((x, A) => 3 + A * 3),
-    l = e.map((x, A) => 4 + A * 3),
-    u = e.map((x, A) => 5 + A * 3);
-  ((a[1] = Pn("<< /Type /Catalog /Pages 2 0 R >>")),
-    (a[2] = Pn(
-      `<< /Type /Pages /Kids [${o.map((x) => `${x} 0 R`).join(" ")}] /Count ${e.length} >>`,
-    )),
-    e.forEach((x, A) => {
-      const E = x.width / x.height,
-        _ = t.width / t.height,
-        k = E >= _ ? t.width : Math.max(1, Math.round(t.height * E)),
-        D = E >= _ ? Math.max(1, Math.round(t.width / E)) : t.height;
-      ((a[o[A]] = Pn(
-        `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${t.width} ${t.height}] /Resources << /XObject << /Im${A} ${l[A]} 0 R >> >> /Contents ${u[A]} 0 R >>`,
-      )),
-        (a[l[A]] = Sb([
-          Pn(`<< /Type /XObject /Subtype /Image /Width ${x.width} /Height ${x.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${x.bytes.length} >>
-stream
-`),
-          x.bytes,
-          Pn(`
-endstream`),
-        ])));
-      const O = `q
-${k} 0 0 ${D} ${(t.width-k)/2} ${(t.height-D)/2} cm
-/Im${A} Do
-Q`;
-      a[u[A]] = Pn(`<< /Length ${O.length} >>
-stream
-${O}
-endstream`);
-    }));
-  const d = Pn(`%PDF-1.4
-%âãÏÓ
-`),
-    f = [d],
-    m = new Array(s + 1).fill(0);
-  let g = d.length;
-  for (let x = 1; x <= s; x += 1) {
-    m[x] = g;
-    const A = Sb([
-      Pn(`${x} 0 obj
-`),
-      a[x],
-      Pn(`
-endobj
-`),
-    ]);
-    (f.push(A), (g += A.length));
-  }
-  const y = g;
-  let v = `xref
-0 ${s + 1}
-0000000000 65535 f 
-`;
-  for (let x = 1; x <= s; x += 1)
-    v += `${String(m[x]).padStart(10, "0")} 00000 n 
-`;
-  return (
-    f.push(
-      Pn(`${v}trailer
-<< /Size ${s + 1} /Root 1 0 R >>
-startxref
-${y}
-%%EOF`),
-    ),
-    new Blob(f, { type: "application/pdf" })
-  );
+async function h0(c,options={}) {
+ let prefs={};try{prefs=JSON.parse(localStorage.getItem('papertrail-preferences')||'{}');}catch{}
+ return createScanPdf(c,u0,{size:prefs.pdfSize,orientation:prefs.orientation,quality:yS().quality,...c.pdfOptions,...options});
 }
 async function d0(c) {
   const t = await h0(c),
@@ -38432,8 +38361,9 @@ const R2 = new URL("./pdf.worker-TGcf_-kp.mjs", import.meta.url).href;
 ha.workerSrc = R2;
 async function $0(c) {
   if (c.type !== "application/pdf" && !/\.pdf$/i.test(c.name)) throw new Error("That file is not a PDF.");
-  const loadingTask = L0({ data: await c.arrayBuffer() });
-  const t = await loadingTask.promise,
+  if(c.size>100*1024*1024)throw new Error("PDF must be below 100 MB.");
+  const {task:loadingTask,pdf:t}=await openPdf(globalThis.pdfjsLib,await c.arrayBuffer(),c.name);
+  const
     e = [];
   try {
   if(t.numPages>200) throw new Error("Import PDFs with 200 pages or fewer.");
@@ -40992,7 +40922,7 @@ function u_() {
     [rt, ct] = tt.useState("idle"),
     ft = tt.useRef(null),
     K = tt.useRef(null), [cropEditing,setCropEditing]=tt.useState(true);
-  (tt.useEffect(() => {
+  (tt.useEffect(()=>{if(f&&m>=f.pages.length)g(Math.max(0,f.pages.length-1));},[f?.pages.length,m]),tt.useEffect(() => {
     f &&
       (A(f.name),
       _(f.watermark || ""),
@@ -41105,9 +41035,10 @@ function u_() {
       let W = null;
       try {
         W = await wy.createWorker(Sy());
-        const lt = await W.recognize(new Blob([(await u0(y)).bytes],{type:"image/jpeg"}));
+        const rendered=await u0(y);
+        const lt = await W.recognize(new Blob([rendered.bytes],{type:"image/jpeg"}),{}, {blocks:true});
         (it(lt.data.text.trim() || "No readable text was found on this page."),
-          await a(f.id, y.id, { ocrText: lt.data.text.trim() }),
+          await a(f.id, y.id, ocrTokens(lt.data,rendered.width,rendered.height)),
           ct("done"));
       } catch {
         (it(
@@ -41125,10 +41056,10 @@ function u_() {
         W = await wy.createWorker(Sy());
         const lt = [];
         for (const Ot of f.pages) {
-          const Qt = (await W.recognize(new Blob([(await u0(Ot)).bytes],{type:"image/jpeg"}))).data.text.trim();
+          const rendered=await u0(Ot),recognized=await W.recognize(new Blob([rendered.bytes],{type:"image/jpeg"}),{}, {blocks:true}),Qt=recognized.data.text.trim();
           (lt.push(`${Ot.name}
 ${Qt || "[No readable text found]"}`),
-            await a(f.id, Ot.id, { ocrText: Qt }));
+            await a(f.id, Ot.id, ocrTokens(recognized.data,rendered.width,rendered.height)));
         }
         (it(lt[m]?.slice(lt[m].indexOf("\n")+1)||""),
           ct("done"),
@@ -43689,7 +43620,7 @@ function mC() {
     }),
   });
 }
-const {EditorTools,LibraryTools,RenderedPage,StorageNotice,SignatureCanvas}=createEnhancements({React:tt,useScanner:Bl,renderPage:u0,makePdf:h0,pdfjs:globalThis.pdfjsLib,safeName:_l,readImage:Ab});
+const {EditorTools,LibraryTools,RenderedPage,StorageNotice,SignatureCanvas}=createEnhancements({React:tt,useScanner:Bl,renderPage:u0,makePdf:h0,pdfjs:globalThis.pdfjsLib,safeName:_l,readImage:Ab,expandImports,recognizeRegion:async blob=>{const worker=await wy.createWorker(Sy());try{return (await worker.recognize(blob)).data.text.trim();}finally{await worker.terminate();}}});
 Vx.createRoot(document.getElementById("root"), {
   onCaughtError: (c, t) => {
     console.error(c, t.componentStack);
@@ -43701,3 +43632,6 @@ Vx.createRoot(document.getElementById("root"), {
     .catch(() => {});
 
 export {u0 as renderPage,h0 as makePdf,$0 as importPdf,rl as writeDocument,uS as readDocuments,hS as removeDocument};
+
+export {createScanPdf,openPdf,ocrTokens};
+export {organizePdfs} from './pdf-tools.js';

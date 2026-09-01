@@ -1,13 +1,20 @@
 <!doctype html><html><head><meta charset="utf-8"><title>Papertrail browser integration checks</title></head><body>
-<h1>Browser integration checks</h1><button id="run">Run checks</button><ol id="results"></ol><div id="root" hidden></div>
+<h1>Browser integration checks</h1><button id="run" disabled>Run checks</button><p id="summary"></p><ol id="results"></ol><div id="root" hidden></div>
+<script>addEventListener('error',e=>document.querySelector('#results').textContent='BOOT ERROR: '+e.message);addEventListener('unhandledrejection',e=>document.querySelector('#results').textContent='BOOT ERROR: '+e.reason);</script>
 <script type="module">
+document.querySelector('#results').textContent='Loading index…';
 const html=await(await fetch('../index.html?integration='+Date.now(),{cache:'no-store'})).text();
 const bundle=html.match(/src="\.\/assets\/(app(?:-[a-f0-9]+)?\.js)"/)[1];
-const {renderPage,makePdf,importPdf,writeDocument,readDocuments,removeDocument}=await import('../assets/'+bundle);
+document.querySelector('#results').textContent='Loading '+bundle;
+const {renderPage,makePdf,importPdf,writeDocument,readDocuments,removeDocument,createScanPdf,organizePdfs,openPdf}=await import('../assets/'+bundle);
+const {preparePrint}=await import('../src/print.js');
+document.querySelector('#results').textContent='Ready';
+document.querySelector('#run').disabled=false;
 const results=document.querySelector('#results');
 const assert=(ok,message)=>{if(!ok)throw Error(message);};
 async function check(name,fn){const li=document.createElement('li');results.append(li);try{await fn();li.textContent='PASS: '+name;}catch(error){li.textContent='FAIL: '+name+' — '+error.message;}}
 document.querySelector('#run').onclick=async()=>{
+  document.querySelector('#run').disabled=true;
   results.replaceChildren();
   const canvas=document.createElement('canvas');canvas.width=400;canvas.height=600;const ctx=canvas.getContext('2d');ctx.fillStyle='white';ctx.fillRect(0,0,400,600);ctx.fillStyle='black';ctx.font='28px sans-serif';ctx.fillText('SCANNER TEST',20,60);ctx.fillStyle='red';ctx.fillRect(20,400,100,100);
   const page={id:'test-page',name:'Test',src:canvas.toDataURL(),rotation:0,brightness:100,contrast:100,filter:'original',crop:{tl:[0,0],tr:[100,0],br:[100,100],bl:[0,100]}};
@@ -19,5 +26,25 @@ document.querySelector('#run').onclick=async()=>{
   await check('Ink changes exported pixels',async()=>{const a=await renderPage(page),b=await renderPage({...page,ink:[{color:'#17363a',width:10,points:[[10,50],[90,70]]}]});assert(a.bytes.length!==b.bytes.length,'ink missing');});
   await check('PDF export/import round trip includes two pages',async()=>{const blob=await makePdf({name:'Round trip',pages:[page,{...page,rotation:90}]});const files=await importPdf(new File([blob],'roundtrip.pdf',{type:'application/pdf'}));assert(files.length===2&&files.every(f=>f.size>1000),'PDF import failed');});
   await check('IndexedDB document survives separate read connection',async()=>{const id='integration-'+crypto.randomUUID();try{await writeDocument({id,name:'Disposable test',updatedAt:new Date().toISOString(),pages:[page]});const saved=(await readDocuments()).find(d=>d.id===id);assert(saved?.pages[0].src===page.src,'document not persisted');}finally{await removeDocument(id);}});
+  const pdfjs=globalThis.pdfjsLib;
+  const tasks=new WeakMap();
+  const load=async(blob,password)=>{const task=pdfjs.getDocument({data:await blob.arrayBuffer(),password}),pdf=await task.promise;tasks.set(pdf,task);return pdf;};
+  for(const size of ['A4','Letter','Legal'])for(const orientation of ['Portrait','Landscape'])for(const searchable of [false,true])for(const protectedPdf of [false,true]){
+    await check(`${size}/${orientation}/search=${searchable}/password=${protectedPdf}`,async()=>{
+      const password=protectedPdf?'synthetic-test-password':undefined;
+      const blob=await createScanPdf({name:'Combination test',pages:[{...page,ocrText:'SCANNER TEST'}]},renderPage,{size,orientation,searchable,password,pageNumbers:true,margin:25});
+      const pdf=await load(blob,password);try{assert(pdf.numPages===1,'wrong page count');const p=await pdf.getPage(1),v=p.getViewport({scale:1});assert((v.width>v.height)===(orientation==='Landscape'),'wrong orientation');const text=(await p.getTextContent()).items.map(i=>i.str).join(' ');assert(text.includes('1 / 1'),'page number absent');assert(text.replace(/\s+/g,' ').includes('SCANNER TEST')===searchable,'search layer mismatch: '+JSON.stringify(text));const c=document.createElement('canvas');c.width=Math.ceil(v.width);c.height=Math.ceil(v.height);await p.render({canvasContext:c.getContext('2d'),viewport:v}).promise;assert(c.getContext('2d').getImageData(0,0,c.width,c.height).data.some((v,i)=>i%4!==3&&v<200),'blank rendering');}finally{await tasks.get(pdf).destroy();}
+    });
+  }
+  await check('Searchable Hindi and accented Latin survive PDF text extraction',async()=>{const blob=await createScanPdf({pages:[{...page,ocrText:'नमस्ते'},{...page,ocrText:'Résumé français'}]},renderPage,{searchable:true});const pdf=await load(blob);try{const a=(await(await pdf.getPage(1)).getTextContent()).items.map(i=>i.str).join(''),b=(await(await pdf.getPage(2)).getTextContent()).items.map(i=>i.str).join('');assert(a.includes('नमस्ते')&&b.includes('Résumé français'),'Unicode text not preserved');}finally{await tasks.get(pdf).destroy();}});
+  await check('Wrong password retries and correct password unlocks',async()=>{const blob=await createScanPdf({pages:[page]},renderPage,{password:'synthetic-secret'});const attempts=[];const {task,pdf}=await openPdf(pdfjs,await blob.arrayBuffer(),'Protected test',async(name,retry)=>{attempts.push(retry);return retry?'synthetic-secret':'wrong';});try{assert(pdf.numPages===1&&attempts.join(',')==='false,true','password retry failed');}finally{await task.destroy();}});
+  await check('Password cancel closes import without hanging',async()=>{const blob=await createScanPdf({pages:[page]},renderPage,{password:'synthetic-secret'});try{await openPdf(pdfjs,await blob.arrayBuffer(),'Cancel test',async()=>null);throw Error('cancel was ignored');}catch(e){assert(e.message.includes('cancelled'),'wrong cancel result');}});
+  await check('ID front/back renders as one page with both images',async()=>{const blob=await createScanPdf({pages:[page,page]},renderPage,{idSheet:true});const pdf=await load(blob);try{assert(pdf.numPages===1,'ID count incorrect');const p=await pdf.getPage(1),ops=await p.getOperatorList();assert(ops.fnArray.filter(op=>op===pdfjs.OPS.paintImageXObject||op===pdfjs.OPS.paintImageXObjectRepeat).length>=1,'ID images missing');}finally{await tasks.get(pdf).destroy();}});
+  await check('Organizer keeps searchable text while reordering and rotating',async()=>{const blob=await createScanPdf({pages:[{...page,ocrText:'FIRST'},{...page,ocrText:'SECOND'}]},renderPage,{searchable:true});const output=await organizePdfs([{bytes:await blob.arrayBuffer(),selection:'2,1'}],{rotation:90,stamp:'REVIEW',pageNumbers:true});const pdf=await load(output);try{const p=await pdf.getPage(1),text=(await p.getTextContent()).items.map(i=>i.str).join(' ');assert(pdf.numPages===2&&p.rotate===90&&text.includes('SECOND')&&text.includes('REVIEW'),'organizer content mismatch');}finally{await tasks.get(pdf).destroy();}});
+  await check('Print uses actual ID PDF layout',async()=>{const frame=document.createElement('iframe');document.body.append(frame);try{const blob=await createScanPdf({pages:[page,page]},renderPage,{idSheet:true,pageNumbers:false});await preparePrint(pdfjs,blob,frame.contentWindow,'Print test');const sheets=frame.contentDocument.querySelectorAll('.sheet');assert(sheets.length===1&&sheets[0].querySelector('img').naturalWidth>1000,'print image missing');assert(!frame.contentDocument.querySelector('button').disabled,'print not ready');}finally{frame.remove();}});
+  document.querySelector('#summary').textContent=`${results.querySelectorAll('li').length} checks finished; ${[...results.children].filter(li=>li.textContent.startsWith('FAIL')).length} failures.`;
+  const sampleId='papertrail-ui-test';await writeDocument({id:sampleId,name:'Review workflow sample',createdAt:new Date().toISOString(),updatedAt:new Date().toISOString(),pages:[{...page,ocrText:'SCANNER TEST'},{...page,id:'test-page-2',name:'Second page',ocrText:'SCANNER TEST'}]});
+  let link=document.querySelector('#sample');if(!link){link=document.createElement('a');link.id='sample';document.body.append(link);}link.textContent='Open synthetic review sample';link.href='../edit/'+sampleId;
+  document.querySelector('#run').disabled=false;
 };
 </script></body></html>

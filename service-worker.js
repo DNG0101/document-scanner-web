@@ -1,5 +1,5 @@
-const CACHE='papertrail-cc1c6ebe14b2';
-const SHELL=["./","./index.html","./assets/app-b34e88e0fb1a.js","./assets/index-CHU_86Cc.css","./assets/tools-f17351194cc6.css","./assets/pdf.worker-TGcf_-kp.mjs","./favicon.svg","./icon-192.svg","./icon-512.svg","./manifest.webmanifest"];
+const CACHE='papertrail-383c2cf70fb4';
+const SHELL=["./","./index.html","./assets/app-1c8ac15f80e3.js","./assets/index-CHU_86Cc.css","./assets/tools-ec3cfa0504e1.css","./assets/pdf.worker-TGcf_-kp.mjs","./assets/fonts/NotoSans.ttf","./assets/fonts/NotoSansDevanagari.ttf","./favicon.svg","./icon-192.svg","./icon-512.svg","./manifest.webmanifest"];
 self.addEventListener('install',event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(SHELL)).then(()=>self.skipWaiting())));
 self.addEventListener('activate',event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k.startsWith('papertrail-')&&k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim())));
 self.addEventListener('fetch',event=>{
