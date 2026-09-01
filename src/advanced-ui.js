@@ -21,7 +21,7 @@ export function createAdvancedTools({React:R,useScanner,renderPage,makePdf,safeN
   const setOption=(key,value)=>run(()=>api.updateDocument(doc.id,{pdfOptions:{...options,[key]:value}}));
   const previewOptions=()=>{if(password!==repeat)throw Error('The PDF passwords do not match.');if(password&&password.length<8)throw Error('Use at least 8 characters for the PDF password.');return {password};};
   const output=async()=>{const fresh=await api.getDocument(doc.id);return makePdf(fresh,previewOptions());};
-  
+
   return h('div',{className:'pt-tools'},h('div',{className:'pt-actions'},
    button('Undo edit',()=>run(async()=>{await api.undo(doc.id);onSelect(0);setStatus('Undone. History is kept for this session.');}),busy),button('Redo edit',()=>run(async()=>{await api.redo(doc.id);onSelect(0);setStatus('Redone.');}),busy),
    button('Copy page text',()=>run(async()=>{if(!page.ocrText?.trim())throw Error('Run OCR first.');await navigator.clipboard.writeText(page.ocrText);setStatus('Page text copied.');}),busy)),
