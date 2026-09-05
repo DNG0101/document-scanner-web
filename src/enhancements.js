@@ -1,8 +1,26 @@
 import {zipSync,strToU8} from 'fflate';
 import {Document,Packer,Paragraph,TextRun} from 'docx';
-import pptxgen from 'pptxgenjs';
 import jsQR from 'jsqr';
+import {createAdvancedTools} from './advanced-ui.js';
 import {pageSelection,fullCrop,csvFromText,validateBackup,download,canvasBlob,imageFromBytes} from './document-tools.js';
+
+const xml=text=>strToU8(text);
+export function slidesPptx(images){
+  if(!images.length)throw Error('Choose at least one page.');
+  const files={
+    '[Content_Types].xml':xml(`<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="jpeg" ContentType="image/jpeg"/><Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>${images.map((_,i)=>`<Override PartName="/ppt/slides/slide${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>`).join('')}</Types>`),
+    '_rels/.rels':xml('<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/></Relationships>'),
+    'ppt/presentation.xml':xml(`<?xml version="1.0" encoding="UTF-8"?><p:presentation xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:sldIdLst>${images.map((_,i)=>`<p:sldId id="${256+i}" r:id="rId${i+1}"/>`).join('')}</p:sldIdLst><p:sldSz cx="12192000" cy="6858000" type="screen16x9"/><p:notesSz cx="6858000" cy="9144000"/></p:presentation>`),
+    'ppt/_rels/presentation.xml.rels':xml(`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${images.map((_,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide${i+1}.xml"/>`).join('')}</Relationships>`)
+  };
+  images.forEach((image,i)=>{
+    const maxW=12192000,maxH=6858000,scale=Math.min(maxW/image.width,maxH/image.height),w=Math.round(image.width*scale),h=Math.round(image.height*scale),x=Math.round((maxW-w)/2),y=Math.round((maxH-h)/2),n=i+1;
+    files[`ppt/media/image${n}.jpeg`]=image.bytes;
+    files[`ppt/slides/slide${n}.xml`]=xml(`<?xml version="1.0" encoding="UTF-8"?><p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/><p:cNvGrpSpPr/><p:nvPr/></p:nvGrpSpPr><p:grpSpPr/><p:pic><p:nvPicPr><p:cNvPr id="2" name="Page ${n}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x="${x}" y="${y}"/><a:ext cx="${w}" cy="${h}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:pic></p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>`);
+    files[`ppt/slides/_rels/slide${n}.xml.rels`]=xml(`<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/image${n}.jpeg"/></Relationships>`);
+  });
+  return new Blob([zipSync(files,{level:0})],{type:'application/vnd.openxmlformats-officedocument.presentationml.presentation'});
+}
 
 export async function decodeQR(file) {
   const image=await createImageBitmap(file);
@@ -14,8 +32,9 @@ export async function decodeQR(file) {
   } finally {image.close();}
 }
 
-export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,safeName,readImage}) {
+export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,safeName,readImage,expandImports,recognizeRegion}) {
   const h=R.createElement;
+  const {Convenience,PdfOrganizer,DropImport}=createAdvancedTools({React:R,useScanner,renderPage,makePdf,safeName,readImage,decodeQR,expandImports,recognizeRegion,RenderedPage,pdfjs});
   const button=(name,action,disabled=false,extra={})=>h('button',{type:'button',onClick:action,disabled,...extra},name);
   function RenderedPage({page,watermark,alt,...props}) {
     const [url,setUrl]=R.useState(''),[error,setError]=R.useState('');
@@ -51,18 +70,18 @@ export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,
       onPointerUp:e=>{if(points.current.length){e.currentTarget.releasePointerCapture(e.pointerId);const stroke={color:'#17363a',width:3,points:[...points.current]};points.current=[];onChange([...strokes,stroke]);}},
       onPointerCancel:()=>{points.current=[];paint.current();}});
   }
-  function Preview({doc,onClose}) {
-    const [index,setIndex]=R.useState(0),[zoom,setZoom]=R.useState(100),[url,setUrl]=R.useState(''),[error,setError]=R.useState(''),[ready,setReady]=R.useState(false);
+  function Preview({doc,options={},partial=false,onClose}) {
+    const [index,setIndex]=R.useState(0),[zoom,setZoom]=R.useState(100),[url,setUrl]=R.useState(''),[error,setError]=R.useState(''),[ready,setReady]=R.useState(false),[count,setCount]=R.useState(0),[visited,setVisited]=R.useState([]);
     const handle=R.useRef(null),pdf=R.useRef(null),blob=R.useRef(null),renderJob=R.useRef(null);
     const {updateDocument}=useScanner();
     R.useEffect(()=>{
       handle.current.showModal();
       let disposed=false,task;
       (async()=>{
-        blob.current=await makePdf(doc); if(disposed)return;
-        task=pdfjs.getDocument({data:await blob.current.arrayBuffer()});
+        blob.current=await makePdf(doc,options); if(disposed)return;
+        task=pdfjs.getDocument({data:await blob.current.arrayBuffer(),password:options.password||undefined});
         const loaded=await task.promise;if(disposed){await task.destroy();return;}
-        pdf.current=loaded;setReady(true);
+        pdf.current=loaded;setCount(loaded.numPages);setReady(true);
       })().catch(e=>!disposed&&setError(e.message));
       return ()=>{disposed=true;renderJob.current?.cancel();task?.destroy();};
     },[]);
@@ -75,27 +94,29 @@ export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,
         const viewport=page.getViewport({scale:1.5}),canvas=document.createElement('canvas');canvas.width=Math.ceil(viewport.width);canvas.height=Math.ceil(viewport.height);
         const task=page.render({canvas,canvasContext:canvas.getContext('2d'),viewport});renderJob.current=task;await task.promise;
         const image=await canvasBlob(canvas);if(disposed)return;
-        objectURL=URL.createObjectURL(image);setUrl(objectURL);
+        objectURL=URL.createObjectURL(image);setUrl(objectURL);setVisited(pages=>[...new Set([...pages,index])]);
       })().catch(e=>{if(!disposed&&e.name!=='RenderingCancelledException')setError(e.message);});
       return ()=>{disposed=true;renderJob.current?.cancel();if(objectURL)URL.revokeObjectURL(objectURL);};
     },[index,ready]);
     return h('dialog',{ref:handle,className:'pt-preview','aria-label':'PDF preview and review',onCancel:onClose,onKeyDown:e=>{
-      if(e.target.tagName==='BUTTON')return;
-      if(e.key==='ArrowRight')setIndex(i=>Math.min(doc.pages.length-1,i+1));
+      if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;
+      if(e.key==='ArrowRight'&&ready)setIndex(i=>Math.min(count-1,i+1));
       if(e.key==='ArrowLeft')setIndex(i=>Math.max(0,i-1));
     }},
       h('header',null,h('h2',null,'PDF preview & review'),button('Close preview',onClose)),
-      h('p',null,`${doc.name} · Page ${index+1} of ${doc.pages.length} · Actual exported PDF, including crop, ink, watermark and paper size.`),
-      h('nav',{'aria-label':'Preview controls'},button('Previous',()=>setIndex(i=>i-1),index===0),button('Next',()=>setIndex(i=>i+1),index===doc.pages.length-1),
+      h('p',null,`${doc.name} · Page ${index+1} of ${count||'…'} · Actual exported PDF, including crop, ink, watermark and paper size.`),
+      h('p',null,`Review progress: ${visited.length} of ${count||'…'} pages viewed. View every page before marking reviewed.`),
+      h('label',null,'Jump to page',h('select',{'aria-label':'Jump to PDF page',disabled:!ready,value:index,onChange:e=>setIndex(Number(e.target.value))},Array.from({length:count},(_,i)=>h('option',{key:i,value:i},String(i+1))))),
+      h('nav',{'aria-label':'Preview controls'},button('Previous',()=>setIndex(i=>i-1),!ready||index===0),button('Next',()=>setIndex(i=>i+1),!ready||index>=count-1),
         button('Zoom out',()=>setZoom(z=>Math.max(50,z-25)),zoom===50),h('output',null,`${zoom}%`),button('Zoom in',()=>setZoom(z=>Math.min(200,z+25)),zoom===200),button('Fit',()=>setZoom(100)),
         button('Download reviewed PDF',()=>download(blob.current,safeName(doc.name,'scan')+'.pdf'),!ready),
-        button('Mark document reviewed',async()=>{try {await updateDocument(doc.id,{reviewedAt:new Date().toISOString()});onClose();}catch(e){setError(e.message);}},!ready)),
+        !partial&&button('Mark document reviewed',async()=>{try {await updateDocument(doc.id,{reviewedAt:new Date().toISOString()});onClose();}catch(e){setError(e.message);}},!ready||!!error||visited.length!==count)),
       error?h('p',{role:'alert'},error):h('div',{className:'pt-preview-sheet'},url?h('img',{src:url,alt:`PDF preview page ${index+1}`,style:{height:zoom*.65+'vh',width:'auto',maxWidth:zoom===100?'100%':'none',objectFit:'contain'}}):h('p',{role:'status'},'Rendering PDF…')));
   }
   function EditorTools({doc,page,onSelect}) {
     const api=useScanner(),[busy,setBusy]=R.useState(false),[notice,setNotice]=R.useState(''),[selection,setSelection]=R.useState(''),[preview,setPreview]=R.useState(null),[text,setText]=R.useState('');
     const current=doc.pages.findIndex(p=>p.id===page.id);
-    const run=async fn=>{setBusy(true);setNotice('');try {await fn();}catch(e){setNotice(e.message||'Operation failed.');}finally{setBusy(false);}};
+    const run=async fn=>{setBusy(true);setNotice('');try {await api.flush();await fn();}catch(e){setNotice(e.message||'Operation failed.');}finally{setBusy(false);}};
     const selected=()=>pageSelection(selection,doc.pages.length).map(i=>doc.pages[i]);
     const rendered=async()=>{const result=[];for(const p of selected())result.push(await renderPage(p,{watermark:doc.watermark}));return result;};
     const saveImageDocument=async(canvas,name)=>{
@@ -119,10 +140,12 @@ export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,
     };
     const exportText=()=>selected().map(p=>p.ocrText||'').join('\n\n');
     return h('section',{className:'pt-tools','aria-label':'Document tools'},h('h2',null,'Review & document tools'),
-      h('div',{className:'pt-actions'},button('Preview & review PDF',()=>run(async()=>{await api.flush();setPreview(await api.getDocument(doc.id));}),busy),h('span',null,doc.reviewedAt?'Reviewed':'Not yet reviewed')),
+      h('div',{className:'pt-actions'},button('Preview & review PDF',()=>run(async()=>{setPreview({doc:await api.getDocument(doc.id),options:{}});}),busy),h('span',null,doc.reviewedAt?'Reviewed':'Not yet reviewed')),
+      h(Convenience,{doc,page,onSelect,onPreview:(doc,options)=>setPreview({doc,options})}),
       h('details',null,h('summary',null,'Pages, exports & conversion'),
         h('label',null,'Page selection',h('input',{'aria-label':'Page selection',placeholder:'All pages, or 1,3-5',value:selection,onChange:e=>setSelection(e.target.value)})),
         h('div',{className:'pt-actions'},
+          button('Preview selected PDF',()=>run(async()=>{const fresh=await api.getDocument(doc.id);const pages=pageSelection(selection,fresh.pages.length).map(i=>fresh.pages[i]);setPreview({doc:{...fresh,pages},options:{},partial:true});}),busy),button('Download selected PDF',()=>run(async()=>{const fresh=await api.getDocument(doc.id),pages=pageSelection(selection,fresh.pages.length).map(i=>fresh.pages[i]);download(await makePdf({...fresh,pages}),safeName(fresh.name,'scan')+'-selected.pdf');}),busy),
           button('Extract selected pages',()=>run(async()=>{const pages=selected();await api.insert({...doc,name:doc.name+' extracted',pages,reviewedAt:undefined});setNotice('Selected pages copied to a new document in your library.');}),busy),
           button('Move page earlier',()=>run(async()=>{await api.reorderPages(doc.id,current,current-1);onSelect(current-1);}),busy||current<1),
           button('Move page later',()=>run(async()=>{await api.reorderPages(doc.id,current,current+1);onSelect(current+1);}),busy||current===doc.pages.length-1),
@@ -136,18 +159,18 @@ export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,
           button('Export text TXT',()=>run(async()=>{const value=exportText();if(!value.trim())throw new Error('Run text extraction first.');download(new Blob([value],{type:'text/plain;charset=utf-8'}),safeName(doc.name,'scan')+'.txt');}),busy),
           button('Export spreadsheet CSV',()=>run(async()=>{const value=exportText();if(!value.trim())throw new Error('Run text extraction first.');download(new Blob(['\uFEFF'+csvFromText(value)],{type:'text/csv;charset=utf-8'}),safeName(doc.name,'scan')+'.csv');setNotice('CSV exported. Review OCR and column alignment before use.');}),busy),
           button('Export Word DOCX',()=>run(async()=>{const value=exportText();if(!value.trim())throw new Error('Run text extraction first.');const word=new Document({sections:[{children:value.split('\n').map(line=>new Paragraph({children:[new TextRun(line)]}))}]});download(await Packer.toBlob(word),safeName(doc.name,'scan')+'.docx');setNotice('Editable text exported; original page layout is not reconstructed.');}),busy),
-          button('Export slides PPTX',()=>run(async()=>{const deck=new pptxgen();deck.layout='LAYOUT_WIDE';for(const p of await rendered()){const slide=deck.addSlide();const blob=new Blob([p.bytes],{type:'image/jpeg'});const data=await readImage(new File([blob],'slide.jpg',{type:'image/jpeg'}));const factor=Math.min(13.333/p.width,7.5/p.height),w=p.width*factor,height=p.height*factor;slide.addImage({data,x:(13.333-w)/2,y:(7.5-height)/2,w,h:height});}await deck.writeFile({fileName:safeName(doc.name,'scan')+'.pptx'});setNotice('Slides downloaded. Each page is an image, not editable slide objects.');}),busy)),
+          button('Export slides PPTX',()=>run(async()=>{download(slidesPptx(await rendered()),safeName(doc.name,'scan')+'.pptx');setNotice('Slides downloaded. Each page is an image, not editable slide objects.');}),busy)),
         h('p',null,'Compression, paper size and orientation are in Settings. CSV infers columns from tabs or multiple spaces. Word exports OCR text; slides contain page images.')),
       h('details',null,h('summary',null,'Page cleanup & annotation'),
         h('div',{className:'pt-actions'},button('Reset crop to full image',()=>run(()=>api.updatePage(doc.id,page.id,{crop:fullCrop()})),busy),
-          button('Apply finish to all pages',()=>run(async()=>{for(const p of doc.pages)await api.updatePage(doc.id,p.id,{filter:page.filter,brightness:page.brightness,contrast:page.contrast});setNotice('Finish applied to every page.');}),busy)),
+          button('Apply finish to all pages',()=>run(async()=>{await api.updatePages(doc.id,doc.pages.map(p=>p.id),{filter:page.filter,brightness:page.brightness,contrast:page.contrast,ocrText:undefined,ocrWords:undefined});setNotice('Finish applied to every page.');}),busy)),
         h('label',null,'Text annotation',h('input',{'aria-label':'Text annotation',value:text,onChange:e=>setText(e.target.value),maxLength:120})),
         button('Add text to page',()=>run(async()=>{if(!text.trim())throw new Error('Enter annotation text first.');const result=await renderPage(page),image=await imageFromBytes(result.bytes),canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);image.close();const font=Math.max(14,Math.round(canvas.width/30));ctx.font=`600 ${font}px sans-serif`;ctx.fillStyle='white';ctx.fillRect(0,canvas.height-font*2,canvas.width,font*2);ctx.fillStyle='#17363a';ctx.fillText(text,16,canvas.height-font*.6,canvas.width-32);const src=await readImage(new File([await canvasBlob(canvas)],'annotated.png',{type:'image/png'}));await api.duplicatePage(doc.id,page.id);await api.updatePage(doc.id,page.id,{src,crop:fullCrop(),rotation:0,filter:'original',brightness:100,contrast:100,ink:[],ocrText:undefined});setText('');setNotice('Text added. An unchanged copy of the page was preserved.');}),busy)),
-      h('p',{role:'status','aria-live':'polite'},busy?'Working locally…':notice),preview&&h(Preview,{doc:preview,onClose:()=>setPreview(null)}));
+      h('p',{role:'status','aria-live':'polite'},busy?'Working locally…':notice),preview&&h(Preview,{doc:preview.doc,options:preview.options,partial:preview.partial,onClose:()=>setPreview(null)}));
   }
   function LibraryTools() {
     const api=useScanner(),input=R.useRef(null),[status,setStatus]=R.useState(''),[busy,setBusy]=R.useState(false);
-    return h('section',{className:'pt-tools','aria-label':'Library backup'},h('details',null,h('summary',null,'Backup & restore'),h('p',null,'Backups include your documents and images. Keep the downloaded file private. Restore adds copies without replacing existing documents.'),
+    return h('section',{'aria-label':'Library backup'},h(DropImport),h(PdfOrganizer),h('details',{className:'pt-tools'},h('summary',null,'Backup & restore'),h('p',null,'Backups include your documents and images. Keep the downloaded file private. Restore adds copies without replacing existing documents.'),
       h('div',{className:'pt-actions'},button('Download library backup',()=>download(new Blob([JSON.stringify({format:'papertrail-backup-v1',documents:api.documents})],{type:'application/json'}),'papertrail-backup.json'),busy),button('Restore backup',()=>input.current.click(),busy)),
       h('input',{ref:input,type:'file',accept:'.json',hidden:true,onChange:async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;setBusy(true);try {if(file.size>150*1024*1024)throw new Error('Backup exceeds 150 MB.');const docs=validateBackup(JSON.parse(await file.text()));let count=0;for(const doc of docs){await api.insert(doc);count++;setStatus(`Restored ${count} of ${docs.length} documents.`);}}catch(error){setStatus(error.message);}finally{setBusy(false);}}}),h('p',{role:'status'},status)));
   }

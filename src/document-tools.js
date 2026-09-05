@@ -33,9 +33,12 @@ export function validateBackup(value) {
     const pages=doc.pages.map(p=>{
       if(typeof p.src!=='string'||!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(p.src)||!validCrop(p.crop)) throw new Error('Backup contains an invalid image or crop.');
       return {name:String(p.name||'Page').slice(0,200),src:p.src,crop:p.crop,rotation:[0,90,180,270].includes(p.rotation)?p.rotation:0,filter:['original','clean','warm','mono'].includes(p.filter)?p.filter:'original',brightness:Math.max(70,Math.min(135,Number(p.brightness)||100)),contrast:Math.max(70,Math.min(140,Number(p.contrast)||100)),ocrText:typeof p.ocrText==='string'?p.ocrText:undefined,
+      ocrWords:Array.isArray(p.ocrWords)?p.ocrWords.filter(w=>typeof w.text==='string'&&['x','y','w','h'].every(k=>Number.isFinite(w[k])&&w[k]>=0&&w[k]<=1)).map(({text,x,y,w,h})=>({text,x,y,w,h})):undefined,
       ink:Array.isArray(p.ink)?p.ink.filter(s=>typeof s.color==='string'&&Number.isFinite(s.width)&&Array.isArray(s.points)&&s.points.every(pt=>Array.isArray(pt)&&pt.length===2&&pt.every(n=>Number.isFinite(n)&&n>=0&&n<=100))):[]};
     });
-    return {name:doc.name.slice(0,200),pages,mode:'document',tags:Array.isArray(doc.tags)?doc.tags.filter(t=>typeof t==='string'):[],folder:typeof doc.folder==='string'?doc.folder:undefined,watermark:typeof doc.watermark==='string'?doc.watermark:undefined};
+    const opts=doc.pdfOptions||{};
+    return {name:doc.name.slice(0,200),pages,mode:'document',tags:Array.isArray(doc.tags)?doc.tags.filter(t=>typeof t==='string'):[],folder:typeof doc.folder==='string'?doc.folder:undefined,watermark:typeof doc.watermark==='string'?doc.watermark:undefined,
+      pdfOptions:{searchable:opts.searchable===true,pageNumbers:opts.pageNumbers===true,idSheet:opts.idSheet===true,margin:Number.isFinite(opts.margin)?Math.max(0,Math.min(100,opts.margin)):18,size:['A4','Letter','Legal'].includes(opts.size)?opts.size:'A4',orientation:opts.orientation==='Landscape'?'Landscape':'Portrait'}};
   });
 }
 export function download(blob,name) {
@@ -45,3 +48,8 @@ export async function canvasBlob(canvas,type='image/png',quality=.92) {
   return new Promise((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Image encoding failed.')),type,quality));
 }
 export async function imageFromBytes(bytes) {return createImageBitmap(new Blob([bytes],{type:'image/jpeg'}));}
+export function regionPixels(region,width,height){
+  if(['x','y','w','h'].some(k=>!Number.isFinite(region[k])||region[k]<0)||region.w<=0||region.h<=0||region.x+region.w>100||region.y+region.h>100)throw Error('The rectangle must fit inside the page.');
+  const x=Math.floor(region.x*width/100),y=Math.floor(region.y*height/100);
+  return {x,y,w:Math.ceil((region.x+region.w)*width/100)-x,h:Math.ceil((region.y+region.h)*height/100)-y};
+}

@@ -9,4 +9,4 @@ http.createServer((req,res)=>{
   if(!file.startsWith(root+path.sep)&&file!==root){res.writeHead(403).end();return;}
   if(!fs.existsSync(file)||fs.statSync(file).isDirectory()) file=path.join(root,'index.html');
   res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream','Cache-Control':'no-store'});fs.createReadStream(file).pipe(res);
-}).listen(4173,'127.0.0.1',()=>console.log('Preview: http://localhost:4173/document-scanner-web/'));
+}).listen(Number(process.env.PORT||4173),'127.0.0.1',()=>console.log(`Preview: http://localhost:${process.env.PORT||4173}/document-scanner-web/`));

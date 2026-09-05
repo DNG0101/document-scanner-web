@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {pageSelection,fullCrop,validCrop,csvFromText,validateBackup} from '../src/document-tools.js';
+import {pageSelection,fullCrop,validCrop,csvFromText,validateBackup,regionPixels} from '../src/document-tools.js';
+import {slidesPptx} from '../src/enhancements.js';
+import {unzipSync,strFromU8} from 'fflate';
 test('blank selection means all pages',()=>assert.deepEqual(pageSelection('',3),[0,1,2]));
 test('ranges preserve requested order and remove duplicates',()=>assert.deepEqual(pageSelection('3,1-2,2',3),[2,0,1]));
 for(const text of ['0','4','2-1','abc','1,','1.5','-1','1-999999999'])test(`invalid selection ${text} is rejected`,()=>assert.throws(()=>pageSelection(text,3)));
@@ -11,3 +13,8 @@ test('out of bounds crop rejected',()=>assert.equal(validCrop({...fullCrop(),tl:
 test('CSV quoting and formula injection protection',()=>assert.equal(csvFromText('Name\t=1+1\nA"B  42'),'"Name","\'=1+1"\r\n"A""B","42"'));
 test('backup rejects remote images',()=>assert.throws(()=>validateBackup({format:'papertrail-backup-v1',documents:[{name:'x',pages:[{src:'https://tracking.test/a.png',crop:fullCrop()}]}]})));
 test('backup validates and limits optional data',()=>{const result=validateBackup({format:'papertrail-backup-v1',documents:[{name:'x',pages:[{src:'data:image/png;base64,AAAA',crop:fullCrop(),brightness:999}]}]});assert.equal(result[0].pages[0].brightness,135);});
+test('backup preserves search/layout metadata but never imports passwords',()=>{const [doc]=validateBackup({format:'papertrail-backup-v1',documents:[{name:'x',pdfOptions:{searchable:true,pageNumbers:true,margin:25,password:'should-not-restore'},pages:[{src:'data:image/png;base64,AAAA',crop:fullCrop(),ocrText:'Word',ocrWords:[{text:'Word',x:.1,y:.2,w:.3,h:.1}]}]}]});assert.equal(doc.pdfOptions.margin,25);assert.equal(doc.pdfOptions.password,undefined);assert.equal(doc.pages[0].ocrWords[0].text,'Word');});
+test('redaction rounds outward to cover fractional boundaries',()=>assert.deepEqual(regionPixels({x:10,y:10,w:30,h:15},333,333),{x:33,y:33,w:101,h:51}));
+for(const region of [{x:-1,y:0,w:1,h:1},{x:90,y:0,w:11,h:1},{x:0,y:0,w:0,h:1},{x:0,y:NaN,w:1,h:1}])test('invalid region '+JSON.stringify(region),()=>assert.throws(()=>regionPixels(region,100,100)));
+test('slides export is a linked two-slide Open XML package',async()=>{const blob=slidesPptx([{bytes:new Uint8Array([255,216,255,217]),width:600,height:800},{bytes:new Uint8Array([255,216,255,217]),width:800,height:600}]),files=unzipSync(new Uint8Array(await blob.arrayBuffer()));assert.ok(files['ppt/media/image1.jpeg']&&files['ppt/slides/slide2.xml']);assert.match(strFromU8(files['ppt/presentation.xml']),/rId2/);assert.match(strFromU8(files['ppt/slides/_rels/slide1.xml.rels']),/image1\.jpeg/);});
+test('slides export rejects an empty selection',()=>assert.throws(()=>slidesPptx([]),/at least one/));
