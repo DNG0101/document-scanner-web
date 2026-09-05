@@ -18,7 +18,8 @@ Reference: user-provided `base (3).apk`, 92,002,511 bytes. Compared by inspectin
 | OCR | Corrected-image single/batch OCR with normalized word positions, editable text, library search and selectable region OCR. Searchable PDFs contain an invisible Unicode text layer. |
 | PDF / security | A4/Letter/Legal portrait/landscape, margins, numbering, AES-256 passwords, searchable Unicode text and password prompts on import. Export passwords stay in component memory and are not backed up. |
 | PDF organizer | Merges, extracts/reorders and quarter-turn rotates original PDF pages while preserving page text/graphics; optional stamps and numbering. Forms, bookmarks, links and digital signatures may not survive copying. |
-| Convenience / safety | Drop/paste import, session undo/redo, full-document rotate/reverse, text pages, PDF-layout printing, region preview and a separate flattened redacted copy without an OCR layer. |
+| Convenience / safety | Drop/paste import, session undo/redo, full-document rotate/reverse, automatically paginated searchable notes, PDF-layout printing, drag-to-select region preview and a separate flattened redacted copy without an OCR layer. |
+| Selected PDF pages | Preview or download a range of pages without first creating another document. Partial previews cannot mark the whole document reviewed. Jump directly to any preview page. |
 | Image / ZIP | Existing single-page JPEG export plus selected-page JPEG ZIP export. |
 | Word | Real DOCX file containing editable OCR paragraphs. Does not reconstruct complex original layout. |
 | Spreadsheet | CSV from OCR text, inferring columns from tabs/multiple spaces; protects against spreadsheet formula injection. Does not reconstruct arbitrary table structure or formulas. |

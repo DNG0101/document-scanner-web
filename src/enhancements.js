@@ -70,7 +70,7 @@ export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,
       onPointerUp:e=>{if(points.current.length){e.currentTarget.releasePointerCapture(e.pointerId);const stroke={color:'#17363a',width:3,points:[...points.current]};points.current=[];onChange([...strokes,stroke]);}},
       onPointerCancel:()=>{points.current=[];paint.current();}});
   }
-  function Preview({doc,options={},onClose}) {
+  function Preview({doc,options={},partial=false,onClose}) {
     const [index,setIndex]=R.useState(0),[zoom,setZoom]=R.useState(100),[url,setUrl]=R.useState(''),[error,setError]=R.useState(''),[ready,setReady]=R.useState(false),[count,setCount]=R.useState(0),[visited,setVisited]=R.useState([]);
     const handle=R.useRef(null),pdf=R.useRef(null),blob=R.useRef(null),renderJob=R.useRef(null);
     const {updateDocument}=useScanner();
@@ -99,17 +99,18 @@ export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,
       return ()=>{disposed=true;renderJob.current?.cancel();if(objectURL)URL.revokeObjectURL(objectURL);};
     },[index,ready]);
     return h('dialog',{ref:handle,className:'pt-preview','aria-label':'PDF preview and review',onCancel:onClose,onKeyDown:e=>{
-      if(e.target.tagName==='BUTTON')return;
+      if(['INPUT','TEXTAREA','SELECT'].includes(e.target.tagName))return;
       if(e.key==='ArrowRight'&&ready)setIndex(i=>Math.min(count-1,i+1));
       if(e.key==='ArrowLeft')setIndex(i=>Math.max(0,i-1));
     }},
       h('header',null,h('h2',null,'PDF preview & review'),button('Close preview',onClose)),
       h('p',null,`${doc.name} · Page ${index+1} of ${count||'…'} · Actual exported PDF, including crop, ink, watermark and paper size.`),
       h('p',null,`Review progress: ${visited.length} of ${count||'…'} pages viewed. View every page before marking reviewed.`),
+      h('label',null,'Jump to page',h('select',{'aria-label':'Jump to PDF page',disabled:!ready,value:index,onChange:e=>setIndex(Number(e.target.value))},Array.from({length:count},(_,i)=>h('option',{key:i,value:i},String(i+1))))),
       h('nav',{'aria-label':'Preview controls'},button('Previous',()=>setIndex(i=>i-1),!ready||index===0),button('Next',()=>setIndex(i=>i+1),!ready||index>=count-1),
         button('Zoom out',()=>setZoom(z=>Math.max(50,z-25)),zoom===50),h('output',null,`${zoom}%`),button('Zoom in',()=>setZoom(z=>Math.min(200,z+25)),zoom===200),button('Fit',()=>setZoom(100)),
         button('Download reviewed PDF',()=>download(blob.current,safeName(doc.name,'scan')+'.pdf'),!ready),
-        button('Mark document reviewed',async()=>{try {await updateDocument(doc.id,{reviewedAt:new Date().toISOString()});onClose();}catch(e){setError(e.message);}},!ready||!!error||visited.length!==count)),
+        !partial&&button('Mark document reviewed',async()=>{try {await updateDocument(doc.id,{reviewedAt:new Date().toISOString()});onClose();}catch(e){setError(e.message);}},!ready||!!error||visited.length!==count)),
       error?h('p',{role:'alert'},error):h('div',{className:'pt-preview-sheet'},url?h('img',{src:url,alt:`PDF preview page ${index+1}`,style:{height:zoom*.65+'vh',width:'auto',maxWidth:zoom===100?'100%':'none',objectFit:'contain'}}):h('p',{role:'status'},'Rendering PDF…')));
   }
   function EditorTools({doc,page,onSelect}) {
@@ -144,6 +145,7 @@ export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,
       h('details',null,h('summary',null,'Pages, exports & conversion'),
         h('label',null,'Page selection',h('input',{'aria-label':'Page selection',placeholder:'All pages, or 1,3-5',value:selection,onChange:e=>setSelection(e.target.value)})),
         h('div',{className:'pt-actions'},
+          button('Preview selected PDF',()=>run(async()=>{const fresh=await api.getDocument(doc.id);const pages=pageSelection(selection,fresh.pages.length).map(i=>fresh.pages[i]);setPreview({doc:{...fresh,pages},options:{},partial:true});}),busy),button('Download selected PDF',()=>run(async()=>{const fresh=await api.getDocument(doc.id),pages=pageSelection(selection,fresh.pages.length).map(i=>fresh.pages[i]);download(await makePdf({...fresh,pages}),safeName(fresh.name,'scan')+'-selected.pdf');}),busy),
           button('Extract selected pages',()=>run(async()=>{const pages=selected();await api.insert({...doc,name:doc.name+' extracted',pages,reviewedAt:undefined});setNotice('Selected pages copied to a new document in your library.');}),busy),
           button('Move page earlier',()=>run(async()=>{await api.reorderPages(doc.id,current,current-1);onSelect(current-1);}),busy||current<1),
           button('Move page later',()=>run(async()=>{await api.reorderPages(doc.id,current,current+1);onSelect(current+1);}),busy||current===doc.pages.length-1),
@@ -164,7 +166,7 @@ export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,
           button('Apply finish to all pages',()=>run(async()=>{await api.updatePages(doc.id,doc.pages.map(p=>p.id),{filter:page.filter,brightness:page.brightness,contrast:page.contrast,ocrText:undefined,ocrWords:undefined});setNotice('Finish applied to every page.');}),busy)),
         h('label',null,'Text annotation',h('input',{'aria-label':'Text annotation',value:text,onChange:e=>setText(e.target.value),maxLength:120})),
         button('Add text to page',()=>run(async()=>{if(!text.trim())throw new Error('Enter annotation text first.');const result=await renderPage(page),image=await imageFromBytes(result.bytes),canvas=document.createElement('canvas');canvas.width=image.width;canvas.height=image.height;const ctx=canvas.getContext('2d');ctx.drawImage(image,0,0);image.close();const font=Math.max(14,Math.round(canvas.width/30));ctx.font=`600 ${font}px sans-serif`;ctx.fillStyle='white';ctx.fillRect(0,canvas.height-font*2,canvas.width,font*2);ctx.fillStyle='#17363a';ctx.fillText(text,16,canvas.height-font*.6,canvas.width-32);const src=await readImage(new File([await canvasBlob(canvas)],'annotated.png',{type:'image/png'}));await api.duplicatePage(doc.id,page.id);await api.updatePage(doc.id,page.id,{src,crop:fullCrop(),rotation:0,filter:'original',brightness:100,contrast:100,ink:[],ocrText:undefined});setText('');setNotice('Text added. An unchanged copy of the page was preserved.');}),busy)),
-      h('p',{role:'status','aria-live':'polite'},busy?'Working locally…':notice),preview&&h(Preview,{doc:preview.doc,options:preview.options,onClose:()=>setPreview(null)}));
+      h('p',{role:'status','aria-live':'polite'},busy?'Working locally…':notice),preview&&h(Preview,{doc:preview.doc,options:preview.options,partial:preview.partial,onClose:()=>setPreview(null)}));
   }
   function LibraryTools() {
     const api=useScanner(),input=R.useRef(null),[status,setStatus]=R.useState(''),[busy,setBusy]=R.useState(false);

@@ -41,6 +41,7 @@ export function createStore(io, id = () => crypto.randomUUID(), now = () => new 
     reversePages: key => mutate(key,doc=>({...doc,pages:[...doc.pages].reverse()})),
     insert: doc => enqueue(() => save({...structuredClone(doc), id: id(), createdAt: now(), pages: doc.pages.map(clonePage)})),
     updateDocument: (key, patch) => mutate(key, doc => ({...doc, ...patch, id: key})),
+    updatePdfOptions: (key, patch) => mutate(key,doc=>({...doc,pdfOptions:{...doc.pdfOptions,...patch}})),
     updatePage: (key, pageId, patch) => mutate(key, doc => {
       if(!doc.pages.some(p=>p.id===pageId))throw Error('Page no longer exists.');
       return {...doc,reviewedAt:undefined,pages:doc.pages.map(p=>p.id===pageId?patchPage(p,patch):p)};

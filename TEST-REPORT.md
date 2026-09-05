@@ -1,8 +1,10 @@
-# Verification report — 2026-09-01
+# Verification report — 2026-09-05
 
 ## Automated checks
 
-`npm test`: **80 passed, 0 failed**.
+`npm test`: **85 passed, 0 failed**.
+
+Release regression checks also passed: selected-page PDF preview/download, prevention of full-document review from a partial preview, automatic pagination of searchable notes, region dragging and redacted-copy creation. Desktop and 390 px preview screenshots were reviewed.
 
 - Sequential and overlapping edits, batch OCR persistence, failed-save rollback, queue recovery, flush error reporting and review invalidation.
 - Stable page IDs, duplicate independence, merge/extraction behavior, reordering bounds and last-page protection.
