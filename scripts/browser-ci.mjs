@@ -45,6 +45,7 @@ try{
   await page.getByRole('button',{name:'Append text pages',exact:true}).click();
   await page.getByText('2 searchable text page(s) appended.',{exact:true}).waitFor();
   await page.getByRole('button',{name:'Page 3 03',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelector('[aria-label="Extracted text"]')?.value.includes('Complete notes'));
   assert.match(await page.getByLabel('Extracted text',{exact:true}).inputValue(),/Complete notes/);
   await page.getByText('Region OCR & redaction',{exact:true}).click();
   const region=page.getByLabel('Select region on page',{exact:true});await region.scrollIntoViewIfNeeded();
