@@ -1,3 +1,4 @@
+import {validateLayout} from './layout.js';
 export const fullCrop = () => ({tl:[0,0],tr:[100,0],br:[100,100],bl:[0,100]});
 export function pageSelection(text, count) {
   if(!text.trim()) return Array.from({length:count},(_,i)=>i);
@@ -34,6 +35,7 @@ export function validateBackup(value) {
       if(typeof p.src!=='string'||!/^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(p.src)||!validCrop(p.crop)) throw new Error('Backup contains an invalid image or crop.');
       return {name:String(p.name||'Page').slice(0,200),src:p.src,crop:p.crop,rotation:[0,90,180,270].includes(p.rotation)?p.rotation:0,filter:['original','clean','warm','mono'].includes(p.filter)?p.filter:'original',brightness:Math.max(70,Math.min(135,Number(p.brightness)||100)),contrast:Math.max(70,Math.min(140,Number(p.contrast)||100)),ocrText:typeof p.ocrText==='string'?p.ocrText:undefined,
       ocrWords:Array.isArray(p.ocrWords)?p.ocrWords.filter(w=>typeof w.text==='string'&&['x','y','w','h'].every(k=>Number.isFinite(w[k])&&w[k]>=0&&w[k]<=1)).map(({text,x,y,w,h})=>({text,x,y,w,h})):undefined,
+      ...(p.composition?{composition:validateLayout(p.composition)}:{}),
       ink:Array.isArray(p.ink)?p.ink.filter(s=>typeof s.color==='string'&&Number.isFinite(s.width)&&Array.isArray(s.points)&&s.points.every(pt=>Array.isArray(pt)&&pt.length===2&&pt.every(n=>Number.isFinite(n)&&n>=0&&n<=100))):[]};
     });
     const opts=doc.pdfOptions||{};
