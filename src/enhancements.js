@@ -1,7 +1,9 @@
+import {createPdfTransfer} from './pdf-transfer-ui.js';
 import {zipSync,strToU8} from 'fflate';
 import {Document,Packer,Paragraph,TextRun} from 'docx';
 import jsQR from 'jsqr';
 import {createAdvancedTools} from './advanced-ui.js';
+import {createLayoutEditor} from './layout-ui.js';
 import {pageSelection,fullCrop,csvFromText,validateBackup,download,canvasBlob,imageFromBytes} from './document-tools.js';
 
 const xml=text=>strToU8(text);
@@ -34,6 +36,8 @@ export async function decodeQR(file) {
 
 export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,safeName,readImage,expandImports,recognizeRegion}) {
   const h=R.createElement;
+  const PdfTransfer=createPdfTransfer(R);
+  const LayoutEditor=createLayoutEditor({React:R,useScanner,renderPage,readImage});
   const {Convenience,PdfOrganizer,DropImport}=createAdvancedTools({React:R,useScanner,renderPage,makePdf,safeName,readImage,decodeQR,expandImports,recognizeRegion,RenderedPage,pdfjs});
   const button=(name,action,disabled=false,extra={})=>h('button',{type:'button',onClick:action,disabled,...extra},name);
   function RenderedPage({page,watermark,alt,...props}) {
@@ -114,6 +118,7 @@ export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,
       error?h('p',{role:'alert'},error):h('div',{className:'pt-preview-sheet'},url?h('img',{src:url,alt:`PDF preview page ${index+1}`,style:{height:zoom*.65+'vh',width:'auto',maxWidth:zoom===100?'100%':'none',objectFit:'contain'}}):h('p',{role:'status'},'Rendering PDF…')));
   }
   function EditorTools({doc,page,onSelect}) {
+    const [layoutOpen,setLayoutOpen]=R.useState(false),[destination,setDestination]=R.useState(''),[insertAt,setInsertAt]=R.useState('');
     const api=useScanner(),[busy,setBusy]=R.useState(false),[notice,setNotice]=R.useState(''),[selection,setSelection]=R.useState(''),[preview,setPreview]=R.useState(null),[text,setText]=R.useState('');
     const current=doc.pages.findIndex(p=>p.id===page.id);
     const run=async fn=>{setBusy(true);setNotice('');try {await api.flush();await fn();}catch(e){setNotice(e.message||'Operation failed.');}finally{setBusy(false);}};
@@ -142,8 +147,13 @@ export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,
     return h('section',{className:'pt-tools','aria-label':'Document tools'},h('h2',null,'Review & document tools'),
       h('div',{className:'pt-actions'},button('Preview & review PDF',()=>run(async()=>{setPreview({doc:await api.getDocument(doc.id),options:{}});}),busy),h('span',null,doc.reviewedAt?'Reviewed':'Not yet reviewed')),
       h(Convenience,{doc,page,onSelect,onPreview:(doc,options)=>setPreview({doc,options})}),
+      button('Edit page layout / text',()=>setLayoutOpen(true),busy),
+      layoutOpen&&h(LayoutEditor,{key:page.id,doc,page,onClose:()=>setLayoutOpen(false)}),
       h('details',null,h('summary',null,'Pages, exports & conversion'),
         h('label',null,'Page selection',h('input',{'aria-label':'Page selection',placeholder:'All pages, or 1,3-5',value:selection,onChange:e=>setSelection(e.target.value)})),
+        h('label',null,'Destination document',h('select',{'aria-label':'Destination document',value:destination,onChange:e=>setDestination(e.target.value),disabled:busy},h('option',{value:''},'Choose another library document'),api.documents.filter(d=>d.id!==doc.id&&!d.trashedAt).map(d=>h('option',{key:d.id,value:d.id},d.name)))),
+        h('label',null,'Insert before page (blank appends)',h('input',{type:'number',min:1,value:insertAt,onChange:e=>setInsertAt(e.target.value),disabled:busy})),
+        ...['Copy','Move'].map(action=>button(action+' selected pages to document',()=>run(async()=>{const fresh=await api.getDocument(doc.id),ids=pageSelection(selection,fresh.pages.length).map(i=>fresh.pages[i].id);await api.transferPages(doc.id,destination,ids,action==='Move',insertAt===''?null:Number(insertAt)-1);onSelect(0);setNotice(action==='Move'?'Pages moved. Export the source and destination PDFs separately.':'Pages copied. Open the destination document to review and export its PDF.');}),busy||!destination)),
         h('div',{className:'pt-actions'},
           button('Preview selected PDF',()=>run(async()=>{const fresh=await api.getDocument(doc.id);const pages=pageSelection(selection,fresh.pages.length).map(i=>fresh.pages[i]);setPreview({doc:{...fresh,pages},options:{},partial:true});}),busy),button('Download selected PDF',()=>run(async()=>{const fresh=await api.getDocument(doc.id),pages=pageSelection(selection,fresh.pages.length).map(i=>fresh.pages[i]);download(await makePdf({...fresh,pages}),safeName(fresh.name,'scan')+'-selected.pdf');}),busy),
           button('Extract selected pages',()=>run(async()=>{const pages=selected();await api.insert({...doc,name:doc.name+' extracted',pages,reviewedAt:undefined});setNotice('Selected pages copied to a new document in your library.');}),busy),
@@ -170,7 +180,7 @@ export function createEnhancements({React:R,useScanner,renderPage,makePdf,pdfjs,
   }
   function LibraryTools() {
     const api=useScanner(),input=R.useRef(null),[status,setStatus]=R.useState(''),[busy,setBusy]=R.useState(false);
-    return h('section',{'aria-label':'Library backup'},h(DropImport),h(PdfOrganizer),h('details',{className:'pt-tools'},h('summary',null,'Backup & restore'),h('p',null,'Backups include your documents and images. Keep the downloaded file private. Restore adds copies without replacing existing documents.'),
+    return h('section',{'aria-label':'Library backup'},h(DropImport),h(PdfOrganizer),h(PdfTransfer),h('details',{className:'pt-tools'},h('summary',null,'Backup & restore'),h('p',null,'Backups include your documents and images. Keep the downloaded file private. Restore adds copies without replacing existing documents.'),
       h('div',{className:'pt-actions'},button('Download library backup',()=>download(new Blob([JSON.stringify({format:'papertrail-backup-v1',documents:api.documents})],{type:'application/json'}),'papertrail-backup.json'),busy),button('Restore backup',()=>input.current.click(),busy)),
       h('input',{ref:input,type:'file',accept:'.json',hidden:true,onChange:async e=>{const file=e.target.files[0];e.target.value='';if(!file)return;setBusy(true);try {if(file.size>150*1024*1024)throw new Error('Backup exceeds 150 MB.');const docs=validateBackup(JSON.parse(await file.text()));let count=0;for(const doc of docs){await api.insert(doc);count++;setStatus(`Restored ${count} of ${docs.length} documents.`);}}catch(error){setStatus(error.message);}finally{setBusy(false);}}}),h('p',{role:'status'},status)));
   }
