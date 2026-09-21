@@ -12,3 +12,9 @@ test('app shell uses a bundled UI font and no-referrer policy',()=>{
   assert.match(html,/assets\/fonts\/NotoSans\.ttf/);
   assert.match(html,/name="referrer" content="no-referrer"/);
 });
+
+test('static shell blocks third-party styles and fonts without restricting OCR network APIs',()=>{
+  assert.match(html,/Content-Security-Policy/);
+  assert.match(html,/style-src 'self' 'unsafe-inline'; font-src 'self' data:/);
+  assert.doesNotMatch(html,/default-src|connect-src|script-src|worker-src/);
+});
