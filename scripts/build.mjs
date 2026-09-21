@@ -5,6 +5,16 @@ import json from '@rollup/plugin-json';
 import terser from '@rollup/plugin-terser';
 import fs from 'node:fs';
 import {createHash} from 'node:crypto';
+
+const cssPath='assets/index-CHU_86Cc.css';
+let appCss=fs.readFileSync(cssPath,'utf8')
+  .replace(/@import\s*["']https:\/\/fonts\.googleapis\.com\/[^"']+["'];?/gi,'')
+  .replace('--app-font-sans:"DM Sans", sans-serif','--app-font-sans:"Inter","Noto Sans",system-ui,-apple-system,"Segoe UI",sans-serif')
+  .replace('--app-font-serif:"Fraunces", Georgia, serif','--app-font-serif:"Inter",Georgia,serif')
+  .replace('--app-font-mono:"DM Mono", monospace','--app-font-mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace');
+if(/fonts\.(?:googleapis|gstatic)\.com/i.test(appCss))throw new Error('Third-party Google Fonts URL remains in the application stylesheet.');
+fs.writeFileSync(cssPath,appCss);
+
 const bundle=await rollup({input:'src/legacy-app.js',plugins:[json(),nodeResolve({browser:true,preferBuiltins:false}),commonjs(),terser({maxWorkers:1})]});
 await bundle.write({file:'assets/app.js',format:'es',inlineDynamicImports:true});
 await bundle.close();
