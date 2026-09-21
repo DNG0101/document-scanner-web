@@ -9,6 +9,22 @@ async function waitEnabled(locator,expected){for(let i=0;i<200;i++){if(await loc
 try{
   for(let i=0;i<40;i++){try{if((await fetch(url)).ok)break;}catch{}if(i===39)throw Error('Preview server did not start');await new Promise(resolve=>setTimeout(resolve,250));}
   browser=await chromium.launch();page=await browser.newPage({viewport:{width:1280,height:900}});
+
+  const shellRequests=[];
+  const capture=request=>shellRequests.push(request.url());
+  page.on('request',capture);
+  await page.goto(url+'edit/nonexistent');
+  await page.waitForLoadState('networkidle');
+  page.off('request',capture);
+  const baseUri=await page.evaluate(()=>document.baseURI);
+  assert.equal(baseUri,url,'Deep-route base URI must resolve to the GitHub Pages application root.');
+  const fontPath=await page.evaluate(()=>new URL('./assets/fonts/NotoSans.ttf',document.baseURI).pathname);
+  assert.equal(fontPath,'/document-scanner-web/assets/fonts/NotoSans.ttf','Bundled font must resolve from deep routes.');
+  assert.equal(shellRequests.some(value=>/fonts\.googleapis\.com|fonts\.gstatic\.com/.test(value)),false,'App shell must not contact Google Fonts.');
+  const fontResponse=await page.request.get(url+'assets/fonts/NotoSans.ttf');
+  assert.equal(fontResponse.ok(),true,'Bundled UI font must be reachable.');
+  console.log('PASS: deep route resolves bundled UI font without Google Fonts requests');
+
   await page.goto(url+'tests/integration.html');
   await page.waitForFunction(()=>!document.querySelector('#run').disabled,{timeout:120000});
   await page.getByRole('button',{name:'Run checks',exact:true}).click();
