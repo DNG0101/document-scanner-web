@@ -6,6 +6,7 @@
     <title>Papertrail — Private document scanner</title>
     <meta name="description" content="Capture, clean up, and export documents locally in your browser. No account and no uploads." />
     <meta name="robots" content="index, follow" />
+    <meta name="referrer" content="no-referrer" />
     <meta property="og:title" content="Papertrail — Private document scanner" />
     <meta property="og:description" content="Capture, clean up, and export documents locally in your browser." />
     <meta property="og:type" content="website" />
@@ -14,9 +15,15 @@
     <meta name="twitter:description" content="Private document scanning, editing, review and export in your browser." />
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <link rel="manifest" href="./manifest.webmanifest" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+      @font-face {
+        font-family: "Inter";
+        src: url("./assets/fonts/NotoSans.ttf") format("truetype");
+        font-style: normal;
+        font-weight: 100 900;
+        font-display: swap;
+      }
+    </style>
     <script>
       (function () {
         var parts = window.location.pathname.split('/').filter(Boolean);
