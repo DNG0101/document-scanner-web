@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {pageSelection,fullCrop,validCrop,csvFromText,validateBackup,regionPixels} from '../src/document-tools.js';
+import {pageSelection,fullCrop,validCrop,csvFromText,validateBackup,regionPixels,imageDataUrlInfo,BACKUP_LIMITS} from '../src/document-tools.js';
 import {slidesPptx} from '../src/enhancements.js';
 import {unzipSync,strFromU8} from 'fflate';
+const validPng='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2Qd8AAAAASUVORK5CYII=';
 test('blank selection means all pages',()=>assert.deepEqual(pageSelection('',3),[0,1,2]));
 test('ranges preserve requested order and remove duplicates',()=>assert.deepEqual(pageSelection('3,1-2,2',3),[2,0,1]));
 for(const text of ['0','4','2-1','abc','1,','1.5','-1','1-999999999'])test(`invalid selection ${text} is rejected`,()=>assert.throws(()=>pageSelection(text,3)));
@@ -12,8 +13,13 @@ test('collapsed crop rejected',()=>assert.equal(validCrop({tl:[0,0],tr:[0,0],br:
 test('out of bounds crop rejected',()=>assert.equal(validCrop({...fullCrop(),tl:[-5,0]}),false));
 test('CSV quoting and formula injection protection',()=>assert.equal(csvFromText('Name\t=1+1\nA"B  42'),'"Name","\'=1+1"\r\n"A""B","42"'));
 test('backup rejects remote images',()=>assert.throws(()=>validateBackup({format:'papertrail-backup-v1',documents:[{name:'x',pages:[{src:'https://tracking.test/a.png',crop:fullCrop()}]}]})));
-test('backup validates and limits optional data',()=>{const result=validateBackup({format:'papertrail-backup-v1',documents:[{name:'x',pages:[{src:'data:image/png;base64,AAAA',crop:fullCrop(),brightness:999}]}]});assert.equal(result[0].pages[0].brightness,135);});
-test('backup preserves search/layout metadata but never imports passwords',()=>{const [doc]=validateBackup({format:'papertrail-backup-v1',documents:[{name:'x',pdfOptions:{searchable:true,pageNumbers:true,margin:25,password:'should-not-restore'},pages:[{src:'data:image/png;base64,AAAA',crop:fullCrop(),ocrText:'Word',ocrWords:[{text:'Word',x:.1,y:.2,w:.3,h:.1}]}]}]});assert.equal(doc.pdfOptions.margin,25);assert.equal(doc.pdfOptions.password,undefined);assert.equal(doc.pages[0].ocrWords[0].text,'Word');});
+test('backup rejects fake image payloads even when MIME and base64 syntax look valid',()=>assert.throws(()=>validateBackup({format:'papertrail-backup-v1',documents:[{name:'x',pages:[{src:'data:image/png;base64,AAAA',crop:fullCrop()}]}]}),/bytes do not match/));
+test('backup rejects MIME and file-signature mismatches',()=>assert.throws(()=>imageDataUrlInfo(validPng.replace('image/png','image/jpeg')),/bytes do not match/));
+test('backup rejects malformed base64 padding',()=>assert.throws(()=>imageDataUrlInfo('data:image/png;base64,iVBORw0KGgo===')));
+test('backup validates and limits optional data',()=>{const result=validateBackup({format:'papertrail-backup-v1',documents:[{name:'x',tags:Array.from({length:150},(_,i)=>'tag-'+i),folder:'f'.repeat(500),watermark:'w'.repeat(500),pages:[{src:validPng,crop:fullCrop(),brightness:999}]}]});assert.equal(result[0].pages[0].brightness,135);assert.equal(result[0].tags.length,BACKUP_LIMITS.maxTagsPerDocument);assert.equal(result[0].folder.length,BACKUP_LIMITS.maxFolderChars);assert.equal(result[0].watermark.length,BACKUP_LIMITS.maxWatermarkChars);});
+test('backup preserves search/layout metadata but never imports passwords',()=>{const [doc]=validateBackup({format:'papertrail-backup-v1',documents:[{name:'x',pdfOptions:{searchable:true,pageNumbers:true,margin:25,password:'should-not-restore'},pages:[{src:validPng,crop:fullCrop(),ocrText:'Word',ocrWords:[{text:'Word',x:.1,y:.2,w:.3,h:.1}]}]}]});assert.equal(doc.pdfOptions.margin,25);assert.equal(doc.pdfOptions.password,undefined);assert.equal(doc.pages[0].ocrWords[0].text,'Word');});
+test('backup drops OCR boxes that extend beyond the page',()=>{const [doc]=validateBackup({format:'papertrail-backup-v1',documents:[{name:'x',pages:[{src:validPng,crop:fullCrop(),ocrWords:[{text:'outside',x:.9,y:.2,w:.2,h:.1}]}]}]});assert.deepEqual(doc.pages[0].ocrWords,[]);});
+test('backup caps total page count across documents',()=>{const page=()=>({src:validPng,crop:fullCrop()});const documents=Array.from({length:5},(_,i)=>({name:'d'+i,pages:Array.from({length:500},page)}));assert.throws(()=>validateBackup({format:'papertrail-backup-v1',documents}),new RegExp(String(BACKUP_LIMITS.maxTotalPages)));});
 test('redaction rounds outward to cover fractional boundaries',()=>assert.deepEqual(regionPixels({x:10,y:10,w:30,h:15},333,333),{x:33,y:33,w:101,h:51}));
 for(const region of [{x:-1,y:0,w:1,h:1},{x:90,y:0,w:11,h:1},{x:0,y:0,w:0,h:1},{x:0,y:NaN,w:1,h:1}])test('invalid region '+JSON.stringify(region),()=>assert.throws(()=>regionPixels(region,100,100)));
 test('slides export is a linked two-slide Open XML package',async()=>{const blob=slidesPptx([{bytes:new Uint8Array([255,216,255,217]),width:600,height:800},{bytes:new Uint8Array([255,216,255,217]),width:800,height:600}]),files=unzipSync(new Uint8Array(await blob.arrayBuffer()));assert.ok(files['ppt/media/image1.jpeg']&&files['ppt/slides/slide2.xml']);assert.match(strFromU8(files['ppt/presentation.xml']),/rId2/);assert.match(strFromU8(files['ppt/slides/_rels/slide1.xml.rels']),/image1\.jpeg/);});
